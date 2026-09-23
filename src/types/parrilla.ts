@@ -93,6 +93,10 @@ export interface ParrillaGenerada {
   pilares: PilarContenido[];
   filas: FilaParrilla[];
   resumen_ejecutivo: ResumenEjecutivo;
+  /** true si se cortó a mitad (faltan días o el resumen es básico). */
+  parcial?: boolean;
+  /** Mensaje claro para marketing cuando el resultado está incompleto. */
+  aviso?: string;
 }
 
 export type GenerateRequestBody = FormParametros;

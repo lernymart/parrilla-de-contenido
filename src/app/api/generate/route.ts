@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateFormParametros, countDays } from "@/lib/validators";
 import { runFullPipeline } from "@/lib/pipeline";
-import type { ApiErrorResponse, GenerateResponse, ParrillaGenerada } from "@/types/parrilla";
+import type {
+  ApiErrorResponse,
+  GenerateResponse,
+  ParrillaGenerada,
+} from "@/types/parrilla";
 
 export const maxDuration = 300;
 
@@ -33,17 +37,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    let investigacion;
-    let pilares;
-    let filas;
-    let resumen;
-
+    let result;
     try {
-      const result = await runFullPipeline(params);
-      investigacion = result.investigacion;
-      pilares = result.pilares;
-      filas = result.filas;
-      resumen = result.resumen;
+      result = await runFullPipeline(params);
     } catch (err) {
       const message =
         err instanceof Error
@@ -70,10 +66,12 @@ export async function POST(req: NextRequest) {
       fecha_desde: params.fechaDesde,
       fecha_hasta: params.fechaHasta,
       parametros: params,
-      investigacion_competencia: investigacion,
-      pilares,
-      filas,
-      resumen_ejecutivo: resumen,
+      investigacion_competencia: result.investigacion,
+      pilares: result.pilares,
+      filas: result.filas,
+      resumen_ejecutivo: result.resumen,
+      parcial: result.parcial,
+      aviso: result.aviso,
     };
 
     return NextResponse.json({

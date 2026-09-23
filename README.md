@@ -13,6 +13,7 @@ Pídele al equipo técnico estas claves y pégalas en un archivo `.env.local` (u
 | Variable | Dónde se obtiene |
 |----------|------------------|
 | `OPENROUTER_API_KEY` | [OpenRouter](https://openrouter.ai/) → Keys |
+| `OPENROUTER_API_KEY_2` | (Opcional) Segunda key de OpenRouter. Se usa sola si la principal falla por cuota o límite. |
 | `SERPAPI_API_KEY` | Misma credencial SerpAPI que usan otras automatizaciones internas |
 
 Modelo de IA configurado: `openai/gpt-4o-mini` (en `config/brand-context.ts`).
@@ -75,4 +76,6 @@ Si cambia el manual de marca o la descripción del negocio, edita solo:
 
 ## Deploy (sugerido)
 
-Sube el repo a Vercel (u otro host Node) y configura `OPENROUTER_API_KEY` y `SERPAPI_API_KEY` en las variables de entorno.
+Sube el repo a Vercel (u otro host Node) y configura `OPENROUTER_API_KEY`, opcionalmente `OPENROUTER_API_KEY_2`, y `SERPAPI_API_KEY` en las variables de entorno.
+
+Si se agota la key principal a mitad de una generación, la app intenta con la de respaldo. Si ambas fallan, igual te entrega los días que ya se alcanzaron a generar (por lotes de ~7 días) para que no se pierda todo.

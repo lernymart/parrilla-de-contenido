@@ -72,6 +72,19 @@ export function ParrillaEditor({ initial, onNueva }: Props) {
 
   return (
     <div className="space-y-6">
+      {parrilla.parcial || parrilla.aviso ? (
+        <div
+          role="alert"
+          className="rounded-xl border border-orange-300 bg-orange-50 px-4 py-4 text-sm text-orange-950"
+        >
+          <p className="font-semibold">Resultado incompleto</p>
+          <p className="mt-1">
+            {parrilla.aviso ||
+              "La generación no terminó todos los días. Descarga lo que hay y regenera los faltantes."}
+          </p>
+        </div>
+      ) : null}
+
       <div
         role="alert"
         className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-4 text-sm text-amber-950"

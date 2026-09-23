@@ -3,20 +3,44 @@ import { OPENROUTER_MODEL, buildBrandSystemPrompt } from "../../config/brand-con
 /**
  * Cliente OpenRouter (API compatible OpenAI).
  * Solo usar desde API routes / server — nunca desde el cliente.
+ *
+ * Soporta clave principal + respaldo:
+ * - OPENROUTER_API_KEY
+ * - OPENROUTER_API_KEY_2
+ * Si la primera falla por cuota/auth/límite, reintenta con la segunda.
  */
 
-async function callOpenRouter(params: {
-  messages: { role: "system" | "user" | "assistant"; content: string }[];
-  temperature?: number;
-  json?: boolean;
-}): Promise<string> {
-  const key = process.env.OPENROUTER_API_KEY;
-  if (!key) {
-    throw new Error(
-      "Falta OPENROUTER_API_KEY en .env.local. Pídesela al equipo técnico."
-    );
-  }
+function getOpenRouterKeys(): string[] {
+  const keys = [
+    process.env.OPENROUTER_API_KEY,
+    process.env.OPENROUTER_API_KEY_2,
+  ]
+    .map((k) => k?.trim())
+    .filter((k): k is string => Boolean(k));
 
+  return Array.from(new Set(keys));
+}
+
+function isRetryableStatus(status: number): boolean {
+  return (
+    status === 401 ||
+    status === 403 ||
+    status === 402 ||
+    status === 429 ||
+    status >= 500
+  );
+}
+
+async function callOpenRouterWithKey(
+  key: string,
+  params: {
+    messages: { role: "system" | "user" | "assistant"; content: string }[];
+    temperature?: number;
+    json?: boolean;
+  }
+): Promise<
+  { ok: true; content: string } | { ok: false; status: number; detail: string }
+> {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -35,10 +59,7 @@ async function callOpenRouter(params: {
 
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    console.error("OpenRouter error:", res.status, detail);
-    throw new Error(
-      "No pudimos conectar con la IA. Revisa la clave de OpenRouter o intenta de nuevo en unos minutos."
-    );
+    return { ok: false, status: res.status, detail };
   }
 
   const data = (await res.json()) as {
@@ -46,9 +67,58 @@ async function callOpenRouter(params: {
   };
   const raw = data.choices?.[0]?.message?.content;
   if (!raw) {
-    throw new Error("La IA no devolvió contenido. Intenta de nuevo.");
+    return { ok: false, status: 502, detail: "empty_content" };
   }
-  return raw;
+  return { ok: true, content: raw };
+}
+
+async function callOpenRouter(params: {
+  messages: { role: "system" | "user" | "assistant"; content: string }[];
+  temperature?: number;
+  json?: boolean;
+}): Promise<string> {
+  const keys = getOpenRouterKeys();
+  if (keys.length === 0) {
+    throw new Error(
+      "Falta OPENROUTER_API_KEY en .env.local (opcional: OPENROUTER_API_KEY_2 de respaldo)."
+    );
+  }
+
+  let lastError = "No pudimos conectar con la IA.";
+
+  for (let i = 0; i < keys.length; i++) {
+    const keyLabel = i === 0 ? "principal" : "respaldo";
+    const result = await callOpenRouterWithKey(keys[i], params);
+
+    if (result.ok) {
+      if (i > 0) {
+        console.warn(`OpenRouter: OK con clave de ${keyLabel}.`);
+      }
+      return result.content;
+    }
+
+    console.error(
+      `OpenRouter error (clave ${keyLabel}):`,
+      result.status,
+      result.detail
+    );
+    lastError =
+      result.status === 402
+        ? "Se agotaron los créditos de OpenRouter."
+        : result.status === 429
+          ? "OpenRouter está limitando las peticiones (rate limit)."
+          : "No pudimos conectar con la IA. Revisa las claves de OpenRouter.";
+
+    const hasNext = i < keys.length - 1;
+    if (!hasNext || !isRetryableStatus(result.status)) {
+      break;
+    }
+    console.warn(
+      `OpenRouter: reintentando con clave de respaldo tras error ${result.status}…`
+    );
+  }
+
+  throw new Error(lastError);
 }
 
 export async function chatJson<T>(params: {

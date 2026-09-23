@@ -16,10 +16,67 @@ import { enumerateDates } from "./validators";
 /**
  * Pipeline de generación en 4 pasos encadenados.
  * Paso 1 (competencia) es obligatorio y siempre corre primero.
+ *
+ * La parrilla (paso 3) se genera por lotes de ~7 días para:
+ * - reducir cortes en un solo prompt enorme
+ * - poder devolver lo ya generado si falla a mitad (tras agotar keys)
  */
+
+const CHUNK_DAYS = 7;
 
 function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    out.push(arr.slice(i, i + size));
+  }
+  return out;
+}
+
+function emptyResumen(filas: FilaParrilla[]): ResumenEjecutivo {
+  const byPilar = new Map<string, number>();
+  const byFormato = new Map<string, number>();
+  const byProd = new Map<string, number>();
+  for (const f of filas) {
+    byPilar.set(f.pilar, (byPilar.get(f.pilar) || 0) + 1);
+    byFormato.set(String(f.formato), (byFormato.get(String(f.formato)) || 0) + 1);
+    byProd.set(
+      String(f.tipoProduccion),
+      (byProd.get(String(f.tipoProduccion)) || 0) + 1
+    );
+  }
+  const total = filas.length || 1;
+  const pct = (n: number) => Math.round((n / total) * 100);
+
+  return {
+    distribucionPilares: Array.from(byPilar.entries()).map(([nombre, cantidad]) => ({
+      nombre,
+      porcentaje: pct(cantidad),
+      cantidad,
+    })),
+    distribucionFormatos: Array.from(byFormato.entries()).map(
+      ([formato, cantidad]) => ({
+        formato,
+        porcentaje: pct(cantidad),
+        cantidad,
+      })
+    ),
+    distribucionProduccion: Array.from(byProd.entries()).map(
+      ([tipo, cantidad]) => ({
+        tipo,
+        porcentaje: pct(cantidad),
+        cantidad,
+      })
+    ),
+    videosAncla: [],
+    metricasSugeridas: [
+      "Revisa alcance y engagement de las piezas ya generadas.",
+      "Completa los días faltantes regenerando fila por fila cuando haya crédito.",
+    ],
+  };
 }
 
 export async function step1Investigacion(
@@ -73,7 +130,7 @@ export async function step2Pilares(
     const peso = Math.round(100 / names.length);
     return names.map((nombre, i) => ({
       nombre: nombre.trim(),
-      descripcion: `Pilar definido por el equipo de marketing.`,
+      descripcion: "Pilar definido por el equipo de marketing.",
       pesoPorcentaje:
         i === names.length - 1 ? 100 - peso * (names.length - 1) : peso,
     }));
@@ -109,25 +166,30 @@ Los pesoPorcentaje deben sumar 100.`,
   return result.pilares || [];
 }
 
-export async function step3Parrilla(
+async function generateChunk(
   params: FormParametros,
   investigacion: InvestigacionCompetencia,
-  pilares: PilarContenido[]
+  pilares: PilarContenido[],
+  fechasChunk: string[],
+  filasPrevias: FilaParrilla[]
 ): Promise<FilaParrilla[]> {
-  const fechas = enumerateDates(params.fechaDesde, params.fechaHasta);
-  const dias = fechas.length;
+  const dias = fechasChunk.length;
+  const prevHooks = filasPrevias
+    .slice(-8)
+    .map((f) => f.hook)
+    .filter(Boolean);
 
   const result = await chatJson<{ filas: Omit<FilaParrilla, "id">[] }>({
     temperature: 0.75,
     systemExtra:
       "Generas parrillas de contenido día a día, realistas y accionables para un equipo de marketing.",
-    userPrompt: `Genera UNA fila de contenido por cada fecha del rango (exactamente ${dias} filas).
+    userPrompt: `Genera UNA fila de contenido por cada fecha del lote (exactamente ${dias} filas).
 
-Fechas (en orden): ${fechas.join(", ")}
+Fechas de este lote (en orden): ${fechasChunk.join(", ")}
 
-Parámetros:
+Parámetros globales:
 - Objetivo del mes: ${params.marcaObjetivoMes || "(ninguno)"}
-- Distribución de producción (aprox. estos % en el total de filas):
+- Distribución de producción (aprox. estos % en el total del mes):
   - video_persona: ${params.distribucion.video_persona}%
   - video_ia: ${params.distribucion.video_ia}%
   - diseno_estatico: ${params.distribucion.diseno_estatico}%
@@ -139,6 +201,9 @@ ${JSON.stringify(pilares, null, 2)}
 
 Hallazgos de competencia a aprovechar (sin copiar, solo inspirar):
 ${investigacion.resumenGeneral}
+
+Hooks recientes ya usados (NO los repitas):
+${prevHooks.length ? prevHooks.join(" | ") : "(ninguno aún)"}
 
 Responde SOLO JSON:
 {
@@ -159,48 +224,59 @@ Responde SOLO JSON:
 }
 
 IMPORTANTE:
-- Exactamente ${dias} filas, una por cada fecha listada.
+- Exactamente ${dias} filas, una por cada fecha listada en este lote.
 - Respeta la distribución de tipo de producción lo más cerca posible.
 - Varía pilares y formatos; no repitas el mismo hook.
 - Copy en tono LernyMart (cercano, motivador, claro).`,
   });
 
-  const filas = (result.filas || []).map((f) => ({
-    ...f,
-    id: uid(),
-    plataformas: f.plataformas || [],
-  }));
+  return (result.filas || [])
+    .filter((f) => fechasChunk.includes(f.fecha))
+    .map((f) => ({
+      ...f,
+      id: uid(),
+      plataformas: f.plataformas || [],
+    }));
+}
 
-  // Garantizar cobertura de fechas si el modelo omitió alguna
-  if (filas.length < fechas.length) {
-    const have = new Set(filas.map((f) => f.fecha));
-    for (const fecha of fechas) {
-      if (!have.has(fecha)) {
-        const plantilla = filas[0];
-        filas.push({
-          id: uid(),
-          fecha,
-          pilar: plantilla?.pilar || pilares[0]?.nombre || "General",
-          formato: params.formatos[0],
-          tipoProduccion:
-            params.distribucion.diseno_estatico >=
-            params.distribucion.video_persona
-              ? "diseno_estatico"
-              : "video_persona",
-          plataformas: params.redes.slice(0, 2),
-          hook: "Idea pendiente de afinar",
-          idea: "Completar esta pieza según el pilar del día.",
-          copySugerido: "",
-          objetivoPost: "engagement",
-          notasProduccion: "Fila auto-completada por cobertura de fechas; editar.",
-        });
+export async function step3Parrilla(
+  params: FormParametros,
+  investigacion: InvestigacionCompetencia,
+  pilares: PilarContenido[]
+): Promise<{ filas: FilaParrilla[]; incompleto: boolean; errorLote?: string }> {
+  const fechas = enumerateDates(params.fechaDesde, params.fechaHasta);
+  const chunks = chunkArray(fechas, CHUNK_DAYS);
+  const filas: FilaParrilla[] = [];
+
+  for (let i = 0; i < chunks.length; i++) {
+    try {
+      const lote = await generateChunk(
+        params,
+        investigacion,
+        pilares,
+        chunks[i],
+        filas
+      );
+      filas.push(...lote);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Falló un lote de la parrilla.";
+      console.error(`step3 lote ${i + 1}/${chunks.length}:`, err);
+      if (filas.length > 0) {
+        return {
+          filas: [...filas].sort((a, b) => a.fecha.localeCompare(b.fecha)),
+          incompleto: true,
+          errorLote: message,
+        };
       }
+      throw err;
     }
   }
 
-  return filas
-    .filter((f) => fechas.includes(f.fecha))
-    .sort((a, b) => a.fecha.localeCompare(b.fecha));
+  return {
+    filas: [...filas].sort((a, b) => a.fecha.localeCompare(b.fecha)),
+    incompleto: false,
+  };
 }
 
 export async function step4Resumen(
@@ -208,7 +284,9 @@ export async function step4Resumen(
   pilares: PilarContenido[],
   filas: FilaParrilla[]
 ): Promise<ResumenEjecutivo> {
-  const result = await chatJson<ResumenEjecutivo>({
+  if (filas.length === 0) return emptyResumen([]);
+
+  return chatJson<ResumenEjecutivo>({
     temperature: 0.5,
     systemExtra:
       "Generas un resumen ejecutivo corto para que marketing valide la parrilla.",
@@ -245,8 +323,6 @@ Responde SOLO JSON:
 
 Incluye exactamente 3 videos ancla. Calcula % reales a partir de las filas.`,
   });
-
-  return result;
 }
 
 export async function regenerateSingleRow(params: {
@@ -299,15 +375,56 @@ Responde SOLO JSON:
   };
 }
 
-export async function runFullPipeline(params: FormParametros): Promise<{
+export interface PipelineResult {
   investigacion: InvestigacionCompetencia;
   pilares: PilarContenido[];
   filas: FilaParrilla[];
   resumen: ResumenEjecutivo;
-}> {
+  parcial: boolean;
+  aviso?: string;
+}
+
+export async function runFullPipeline(
+  params: FormParametros
+): Promise<PipelineResult> {
+  const fechasPedidas = enumerateDates(params.fechaDesde, params.fechaHasta);
+
   const investigacion = await step1Investigacion(params.competidores);
   const pilares = await step2Pilares(params, investigacion);
-  const filas = await step3Parrilla(params, investigacion, pilares);
-  const resumen = await step4Resumen(params, pilares, filas);
-  return { investigacion, pilares, filas, resumen };
+
+  const { filas, incompleto, errorLote } = await step3Parrilla(
+    params,
+    investigacion,
+    pilares
+  );
+
+  let resumen: ResumenEjecutivo;
+  let parcial = incompleto;
+  let aviso: string | undefined;
+
+  if (incompleto) {
+    aviso =
+      `La generación se detuvo a mitad (créditos o error de IA). Se devolvieron ${filas.length} de ${fechasPedidas.length} días. ` +
+      `Descarga lo que hay y regenera los días faltantes uno a uno cuando haya crédito.` +
+      (errorLote ? ` Detalle: ${errorLote}` : "");
+  }
+
+  try {
+    resumen = await step4Resumen(params, pilares, filas);
+  } catch (err) {
+    console.error("step4 resumen falló; usando resumen local:", err);
+    resumen = emptyResumen(filas);
+    parcial = true;
+    aviso =
+      (aviso ? `${aviso} ` : "") +
+      "No se pudo armar el resumen ejecutivo con IA; se calculó uno básico con lo generado.";
+  }
+
+  if (filas.length === 0) {
+    throw new Error(
+      "No se pudo generar ningún día de la parrilla. Revisa las claves de OpenRouter e intenta de nuevo."
+    );
+  }
+
+  return { investigacion, pilares, filas, resumen, parcial, aviso };
 }
