@@ -4,15 +4,25 @@ import { useState } from "react";
 import { ContentForm } from "@/components/ContentForm";
 import { LoadingState } from "@/components/LoadingState";
 import { ParrillaEditor } from "@/components/ParrillaEditor";
+import { useBrand } from "@/components/BrandProvider";
 import type { FormParametros, ParrillaGenerada } from "@/types/parrilla";
 
 export function HomeClient() {
+  const { brand, brandId } = useBrand();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [parrilla, setParrilla] = useState<ParrillaGenerada | null>(null);
   const [lastParams, setLastParams] = useState<
     Partial<FormParametros> | undefined
   >();
+  const [seenBrand, setSeenBrand] = useState(brandId);
+
+  if (seenBrand !== brandId) {
+    setSeenBrand(brandId);
+    setParrilla(null);
+    setError(null);
+    setLastParams(undefined);
+  }
 
   async function handleSubmit(data: FormParametros) {
     setLoading(true);
@@ -57,17 +67,19 @@ export function HomeClient() {
     <div className="max-w-3xl">
       <div className="mb-8">
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
-          Generar parrilla de contenido
+          Generar parrilla — {brand.nombre}
         </h1>
         <p className="mt-2 text-slate-600">
-          Completa el formulario. La herramienta investigará a la competencia,
-          armará el calendario día a día y te permitirá descargarlo. No se
-          guarda en la nube: descarga el archivo al terminar.
+          Completa el formulario para {brand.nombre}. La herramienta investigará
+          a la competencia, armará el calendario día a día y te permitirá
+          descargarlo. Cambia de empresa arriba a la derecha cuando lo necesites.
         </p>
       </div>
 
       {loading ? (
-        <LoadingState tip="Estamos buscando qué publica la competencia y luego armamos tu mes completo." />
+        <LoadingState
+          tip={`Estamos investigando competencia de ${brand.nombre} y armando tu mes.`}
+        />
       ) : null}
 
       {error ? (
@@ -88,6 +100,7 @@ export function HomeClient() {
       ) : null}
 
       <ContentForm
+        key={brandId}
         initial={lastParams}
         onSubmit={handleSubmit}
         submitting={loading}

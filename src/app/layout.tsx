@@ -1,3 +1,4 @@
+import { BrandProvider } from "@/components/BrandProvider";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
@@ -8,9 +9,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Parrilla de contenido | LernyMart",
+  title: "Parrilla de contenido",
   description:
-    "Genera parrillas de contenido mensuales con investigación de competencia e IA.",
+    "Genera parrillas de contenido con investigación de competencia e IA para LernyMart e Intercert Latam.",
 };
 
 export default function RootLayout({
@@ -21,7 +22,7 @@ export default function RootLayout({
   return (
     <html lang="es">
       <body className={`${inter.variable} font-sans antialiased text-slate-900`}>
-        {children}
+        <BrandProvider>{children}</BrandProvider>
       </body>
     </html>
   );

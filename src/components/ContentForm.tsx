@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  COMPETIDORES_DEFAULT,
   FORMATOS_DISPONIBLES,
   REDES_DISPONIBLES,
   TIPOS_PRODUCCION,
 } from "../../config/brand-context";
+import { useBrand } from "@/components/BrandProvider";
 import type {
   DistribucionProduccion,
   FormatoId,
@@ -62,6 +62,8 @@ export interface ContentFormProps {
 }
 
 export function ContentForm({ initial, onSubmit, submitting }: ContentFormProps) {
+  const { brand, brandId } = useBrand();
+
   const [fechaDesde, setFechaDesde] = useState(initial?.fechaDesde || "");
   const [fechaHasta, setFechaHasta] = useState(initial?.fechaHasta || "");
   const [marcaObjetivoMes, setMarcaObjetivoMes] = useState(
@@ -78,7 +80,7 @@ export function ContentForm({ initial, onSubmit, submitting }: ContentFormProps)
       (REDES_DISPONIBLES.filter((r) => r.default).map((r) => r.id) as RedId[])
   );
   const [competidores, setCompetidores] = useState<string[]>(
-    initial?.competidores || [...COMPETIDORES_DEFAULT]
+    initial?.competidores || [...brand.competidoresDefault]
   );
   const [chipInput, setChipInput] = useState("");
   const [pilaresIaDecide, setPilaresIaDecide] = useState(
@@ -88,6 +90,15 @@ export function ContentForm({ initial, onSubmit, submitting }: ContentFormProps)
     (initial?.pilaresManual || []).join("\n")
   );
   const [error, setError] = useState<string | null>(null);
+
+  // Al cambiar de empresa, precarga sus competidores por defecto
+  useEffect(() => {
+    if (initial?.brandId && initial.brandId === brandId && initial.competidores) {
+      return;
+    }
+    setCompetidores([...brand.competidoresDefault]);
+    setError(null);
+  }, [brandId, brand.competidoresDefault, initial?.brandId, initial?.competidores]);
 
   const dias = useMemo(() => {
     if (!fechaDesde || !fechaHasta || fechaDesde > fechaHasta) return 0;
@@ -161,6 +172,7 @@ export function ContentForm({ initial, onSubmit, submitting }: ContentFormProps)
     }
 
     onSubmit({
+      brandId,
       fechaDesde,
       fechaHasta,
       marcaObjetivoMes: marcaObjetivoMes.trim() || undefined,

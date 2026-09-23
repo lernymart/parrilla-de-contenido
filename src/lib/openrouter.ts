@@ -47,7 +47,7 @@ async function callOpenRouterWithKey(
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
       "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-      "X-Title": "LernyMart Parrilla Contenido",
+      "X-Title": "Parrilla Contenido Multi-marca",
     },
     body: JSON.stringify({
       model: OPENROUTER_MODEL,
@@ -125,8 +125,9 @@ export async function chatJson<T>(params: {
   userPrompt: string;
   systemExtra?: string;
   temperature?: number;
+  brandId?: string | null;
 }): Promise<T> {
-  const system = [buildBrandSystemPrompt(), params.systemExtra]
+  const system = [buildBrandSystemPrompt(params.brandId), params.systemExtra]
     .filter(Boolean)
     .join("\n\n");
 

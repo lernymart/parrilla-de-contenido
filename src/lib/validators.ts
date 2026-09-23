@@ -11,6 +11,7 @@ const distribucionSchema = z.object({
 
 export const formParametrosSchema = z
   .object({
+    brandId: z.enum(["lernymart", "intercert"]).default("lernymart"),
     fechaDesde: z.string().min(1, "Elige la fecha de inicio."),
     fechaHasta: z.string().min(1, "Elige la fecha de fin."),
     marcaObjetivoMes: z.string().max(200).optional(),

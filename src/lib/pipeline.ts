@@ -12,11 +12,12 @@ import {
   formatSearchBundlesForLlm,
 } from "./serpapi";
 import { enumerateDates } from "./validators";
+import { getBrand } from "../../config/brand-context";
 
 /**
  * Pipeline de generación en 4 pasos encadenados.
  * Paso 1 (competencia) es obligatorio y siempre corre primero.
- *
+ *2
  * La parrilla (paso 3) se genera por lotes de ~7 días para:
  * - reducir cortes en un solo prompt enorme
  * - poder devolver lo ya generado si falla a mitad (tras agotar keys)
@@ -80,8 +81,10 @@ function emptyResumen(filas: FilaParrilla[]): ResumenEjecutivo {
 }
 
 export async function step1Investigacion(
-  competidores: string[]
+  competidores: string[],
+  brandId?: string | null
 ): Promise<InvestigacionCompetencia> {
+  const brand = getBrand(brandId);
   const bundles = await investigateCompetitors(competidores);
   const rawText = formatSearchBundlesForLlm(bundles);
   const fuentes = bundles.flatMap((b) => b.resultados.map((r) => r.link));
@@ -90,10 +93,11 @@ export async function step1Investigacion(
     resumenGeneral: string;
     hallazgos: HallazgoCompetencia[];
   }>({
+    brandId,
     temperature: 0.4,
     systemExtra:
       "Tu tarea es resumir hallazgos de competencia a partir de resultados de búsqueda web. Sé concreto y orientado a contenido en redes.",
-    userPrompt: `Analiza estos resultados de búsqueda sobre competidores de LernyMart y resume qué tipo de contenido están publicando en redes sociales.
+    userPrompt: `Analiza estos resultados de búsqueda sobre competidores de ${brand.nombre} y resume qué tipo de contenido están publicando en redes sociales.
 
 ${rawText}
 
@@ -136,10 +140,12 @@ export async function step2Pilares(
     }));
   }
 
+  const brand = getBrand(params.brandId);
   const result = await chatJson<{ pilares: PilarContenido[] }>({
+    brandId: params.brandId,
     temperature: 0.6,
     systemExtra:
-      "Propón pilares de contenido estratégicos para redes sociales de LernyMart.",
+      `Propón pilares de contenido estratégicos para redes sociales de ${brand.nombre}.`,
     userPrompt: `Con base en la investigación de competencia y el objetivo del mes, propone entre 4 y 6 pilares de contenido.
 
 Objetivo / marca del mes: ${params.marcaObjetivoMes || "(sin objetivo específico)"}
@@ -179,7 +185,9 @@ async function generateChunk(
     .map((f) => f.hook)
     .filter(Boolean);
 
+  const brand = getBrand(params.brandId);
   const result = await chatJson<{ filas: Omit<FilaParrilla, "id">[] }>({
+    brandId: params.brandId,
     temperature: 0.75,
     systemExtra:
       "Generas parrillas de contenido día a día, realistas y accionables para un equipo de marketing.",
@@ -227,7 +235,7 @@ IMPORTANTE:
 - Exactamente ${dias} filas, una por cada fecha listada en este lote.
 - Respeta la distribución de tipo de producción lo más cerca posible.
 - Varía pilares y formatos; no repitas el mismo hook.
-- Copy en tono LernyMart (cercano, motivador, claro).`,
+- Copy en tono ${brand.nombre} (cercano, motivador, claro).`,
   });
 
   return (result.filas || [])
@@ -287,6 +295,7 @@ export async function step4Resumen(
   if (filas.length === 0) return emptyResumen([]);
 
   return chatJson<ResumenEjecutivo>({
+    brandId: params.brandId,
     temperature: 0.5,
     systemExtra:
       "Generas un resumen ejecutivo corto para que marketing valide la parrilla.",
@@ -333,6 +342,7 @@ export async function regenerateSingleRow(params: {
   filasVecinas: FilaParrilla[];
 }): Promise<FilaParrilla> {
   const result = await chatJson<{ fila: Omit<FilaParrilla, "id"> }>({
+    brandId: params.form.brandId,
     temperature: 0.8,
     systemExtra:
       "Regeneras UNA sola fila de la parrilla sin romper la coherencia del mes.",
@@ -389,7 +399,9 @@ export async function runFullPipeline(
 ): Promise<PipelineResult> {
   const fechasPedidas = enumerateDates(params.fechaDesde, params.fechaHasta);
 
-  const investigacion = await step1Investigacion(params.competidores);
+  const brandId = params.brandId;
+
+  const investigacion = await step1Investigacion(params.competidores, brandId);
   const pilares = await step2Pilares(params, investigacion);
 
   const { filas, incompleto, errorLote } = await step3Parrilla(

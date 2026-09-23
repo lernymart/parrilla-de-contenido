@@ -1,5 +1,9 @@
 /** Tipos compartidos de la parrilla de contenido. */
 
+import type { BrandId } from "../../config/brands/types";
+
+export type { BrandId };
+
 export type FormatoId =
   | "reel_short"
   | "carrusel"
@@ -25,6 +29,8 @@ export interface DistribucionProduccion {
 }
 
 export interface FormParametros {
+  /** Empresa activa: lernymart | intercert */
+  brandId: BrandId;
   fechaDesde: string; // YYYY-MM-DD
   fechaHasta: string;
   marcaObjetivoMes?: string;
